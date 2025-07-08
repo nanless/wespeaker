@@ -169,7 +169,7 @@ class SimAM_ResNet100_ASP(nn.Module):
 
 if __name__ == '__main__':
     x = torch.zeros(1, 200, 80)
-    model = SimAM_ResNet34_ASP(embed_dim=256)
+    model = SimAM_ResNet100_ASP(embed_dim=256)
     model.eval()
     out = model(x)
     print(out[-1].size())
