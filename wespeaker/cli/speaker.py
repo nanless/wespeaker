@@ -97,6 +97,8 @@ class Speaker:
                       frame_length=25,
                       frame_shift=10,
                       cmn=True):
+        # if wavform.abs().max() < 1.0:
+        # wavform = wavform * (1 << 15)
         feat = kaldi.fbank(wavform,
                            num_mel_bins=num_mel_bins,
                            frame_length=frame_length,
