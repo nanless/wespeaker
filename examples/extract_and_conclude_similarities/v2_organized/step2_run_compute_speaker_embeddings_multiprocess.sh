@@ -6,8 +6,8 @@
 set -e
 
 # Configuration
-UTTERANCES_DIR="/root/group-shared/voiceprint/data/test_data/speech_enhancement/tse_selftest_20250717/embeddings_wespeaker_samresnet_range1/embeddings_utterances"
-SPEAKERS_DIR="/root/group-shared/voiceprint/data/test_data/speech_enhancement/tse_selftest_20250717/embeddings_wespeaker_samresnet_range1/embeddings_speakers"
+UTTERANCES_DIR="/root/group-shared/voiceprint/data/speech/speech_enhancement/audio_segments_20250808/merged_datasets_20250610_vad_segments/audioembeddings_wespeaker_samresnet100/embeddings_utterances"
+SPEAKERS_DIR="/root/group-shared/voiceprint/data/speech/speech_enhancement/audio_segments_20250808/merged_datasets_20250610_vad_segments/audioembeddings_wespeaker_samresnet100/embeddings_speakers"
 MIN_UTTERANCES=1
 NUM_PROCESSES=$(nproc)  # Use all available CPU cores
 CHUNK_SIZE=10

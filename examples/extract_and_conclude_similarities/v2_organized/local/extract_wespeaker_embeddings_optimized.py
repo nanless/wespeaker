@@ -13,6 +13,7 @@ from tqdm import tqdm
 import time
 import threading
 import queue
+import random
 
 # Add wespeaker to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -36,6 +37,10 @@ def get_args():
                         help='Number of file I/O worker threads per GPU')
     parser.add_argument('--skip_existing', action='store_true', default=False,
                         help='Skip files that already have embeddings')
+    parser.add_argument('--random_shuffle', action='store_true', default=True,
+                        help='Randomly shuffle audio files for better load balancing (default: True)')
+    parser.add_argument('--random_seed', type=int, default=42,
+                        help='Random seed for shuffling (default: 42)')
     
     return parser.parse_args()
 
@@ -147,6 +152,14 @@ def process_subset_optimized(rank, world_size, args):
     # Scan all audio files (only rank 0 does this to avoid race conditions)
     if rank == 0:
         all_audio_files = scan_audio_files_optimized(args.data_root, args.output_dir, args.skip_existing)
+        
+        # Randomly shuffle files for better load balancing
+        if args.random_shuffle:
+            print(f"Shuffling audio files with seed {args.random_seed} for load balancing...")
+            random.seed(args.random_seed)
+            random.shuffle(all_audio_files)
+            print("Audio files shuffled successfully.")
+        
         # Save to shared file for other ranks
         with open('/tmp/audio_files_list.pkl', 'wb') as f:
             pickle.dump(all_audio_files, f)
@@ -256,6 +269,9 @@ def main():
     print(f"Batch size: {args.batch_size}")
     print(f"I/O workers per GPU: {args.num_workers}")
     print(f"Skip existing: {args.skip_existing}")
+    print(f"Random shuffle for load balancing: {args.random_shuffle}")
+    if args.random_shuffle:
+        print(f"Random seed: {args.random_seed}")
     
     # Create output directory
     os.makedirs(args.output_dir, exist_ok=True)
