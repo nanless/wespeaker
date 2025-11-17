@@ -60,6 +60,26 @@ def scan_audio_files_optimized(data_root, output_dir=None, skip_existing=True):
     print("Scanning audio files...")
     start_time = time.time()
     
+    # First, build a set of existing embeddings for fast lookup
+    existing_embeddings = set()
+    if skip_existing and output_dir and os.path.exists(output_dir):
+        print("Building index of existing embeddings...")
+        index_start = time.time()
+        for root, dirs, files in os.walk(output_dir):
+            for file in files:
+                if file.endswith('.pkl'):
+                    # Extract relative path: dataset/speaker_id/utterance_id.pkl
+                    rel_path = os.path.relpath(os.path.join(root, file), output_dir)
+                    # Remove .pkl extension to get key
+                    key = rel_path[:-4]  # Remove '.pkl'
+                    existing_embeddings.add(key)
+        index_time = time.time() - index_start
+        print(f"Found {len(existing_embeddings)} existing embeddings in {index_time:.2f}s")
+    
+    # Now scan audio files
+    print("Scanning source audio files...")
+    scan_start = time.time()
+    
     for dataset_dir in Path(data_root).iterdir():
         if not dataset_dir.is_dir() or dataset_dir.name == 'embeddings':
             continue
@@ -74,10 +94,10 @@ def scan_audio_files_optimized(data_root, output_dir=None, skip_existing=True):
             
             for audio_file in speaker_dir.iterdir():
                 if audio_file.suffix.lower() in ['.wav', '.flac', '.mp3']:
-                    # Check if embedding already exists
+                    # Check if embedding already exists using set lookup (O(1))
                     if skip_existing and output_dir:
-                        embedding_path = os.path.join(output_dir, dataset_name, speaker_id, f"{audio_file.stem}.pkl")
-                        if os.path.exists(embedding_path):
+                        key = f"{dataset_name}/{speaker_id}/{audio_file.stem}"
+                        if key in existing_embeddings:
                             skipped_count += 1
                             continue
                     
@@ -90,7 +110,8 @@ def scan_audio_files_optimized(data_root, output_dir=None, skip_existing=True):
                     })
     
     scan_time = time.time() - start_time
-    print(f"Scanning completed in {scan_time:.2f}s. Found {len(audio_files)} new files to process, skipped {skipped_count} existing files.")
+    print(f"Audio scanning completed in {time.time() - scan_start:.2f}s")
+    print(f"Total scanning time: {scan_time:.2f}s. Found {len(audio_files)} new files to process, skipped {skipped_count} existing files.")
     
     return audio_files
 

@@ -13,7 +13,7 @@ GPUS="0,1,2,3,4,5,6,7"  # Available GPUs (8 cards)
 # Optimization parameters
 BATCH_SIZE=24        # Increase batch size for better GPU utilization
 NUM_WORKERS=6        # I/O worker threads per GPU
-SKIP_EXISTING=false   # Skip files that already have embeddings
+SKIP_EXISTING=true   # Skip files that already have embeddings
 RANDOM_SHUFFLE=true  # Randomly shuffle files for better load balancing
 RANDOM_SEED=42       # Random seed for reproducible shuffling
 
