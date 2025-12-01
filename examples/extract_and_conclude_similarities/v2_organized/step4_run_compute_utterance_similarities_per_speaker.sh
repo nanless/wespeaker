@@ -10,12 +10,13 @@ EMBEDDINGS_DIR="/root/group-shared/voiceprint/data/speech/speaker_diarization/me
 UTTERANCES_SUBDIR="embeddings_utterances"
 OUTPUT_SUBDIR="utterance_similarities_per_speaker"
 NUM_WORKERS=1
-NUM_WORKERS_INTERNAL=100
+NUM_WORKERS_INTERNAL=64
 BATCH_SIZE=10
 MIN_UTTERANCES=2
 SKIP_EXISTING=true
 MAX_SPEAKERS=
 MAX_UTTERANCES=
+MAX_UTTERANCES_LIMIT=5000
 SIMILARITY_THRESHOLD=0.7
 
 # Colors for output
@@ -47,6 +48,7 @@ fi
 if [ -n "$MAX_SPEAKERS" ]; then
     echo -e "  🔢 Max speakers: ${MAX_SPEAKERS}"
 fi
+echo -e "  🔢 Max utterances limit: ${MAX_UTTERANCES_LIMIT} (speakers with more will be skipped, matrix too large)"
 echo -e "  📊 Similarity threshold: ${SIMILARITY_THRESHOLD} (only pairs >= threshold will be saved)"
 echo -e "${BLUE}===============================================${NC}"
 
@@ -140,6 +142,7 @@ if [ "$SKIP_EXISTING" = true ]; then
 fi
 
 CMD_ARGS+=("--similarity_threshold" "$SIMILARITY_THRESHOLD")
+CMD_ARGS+=("--max_utterances_limit" "$MAX_UTTERANCES_LIMIT")
 
 if [ -n "$MAX_SPEAKERS" ]; then
     CMD_ARGS+=("--max_speakers" "$MAX_SPEAKERS")
