@@ -6,7 +6,7 @@
 set -e
 
 # Configuration - matching step1 and step2 paths
-EMBEDDINGS_DIR="/root/group-shared/voiceprint/data/speech/speaker_diarization/merged_datasets_20250610_vad_segments_mtfaa_enhanced_extend_kid_withclone/embeddings_wespeaker_samresnet100"
+EMBEDDINGS_DIR="/root/group-shared/voiceprint/data/speech/speaker_diarization/merged_datasets_20250610_vad_segments_mtfaa_enhanced_extend_kid_withclone_addlibrilight_1130/embeddings_wespeaker_samresnet100"
 UTTERANCES_SUBDIR="embeddings_utterances"
 SPEAKERS_OUTPUT_SUBDIR="embeddings_speakers"
 SIMILARITIES_OUTPUT_SUBDIR="speaker_similarity_analysis"

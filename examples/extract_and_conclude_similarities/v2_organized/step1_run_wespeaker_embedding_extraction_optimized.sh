@@ -4,9 +4,9 @@ set -e
 . ./path.sh || exit 1
 
 # Configuration - Optimized version
-DATA_ROOT="/root/group-shared/voiceprint/data/speech/speaker_diarization/merged_datasets_20250610_vad_segments_mtfaa_enhanced_extend_kid_withclone/audio"
+DATA_ROOT="/root/group-shared/voiceprint/data/speech/speaker_diarization/merged_datasets_20250610_vad_segments_mtfaa_enhanced_extend_kid_withclone_addlibrilight_1130/audio"
 MODEL_DIR="/root/workspace/speaker_verification/mix_adult_kid/exp/voxblink2_samresnet100"
-OUTPUT_DIR="/root/group-shared/voiceprint/data/speech/speaker_diarization/merged_datasets_20250610_vad_segments_mtfaa_enhanced_extend_kid_withclone/embeddings_wespeaker_samresnet100/embeddings_utterances"
+OUTPUT_DIR="/root/group-shared/voiceprint/data/speech/speaker_diarization/merged_datasets_20250610_vad_segments_mtfaa_enhanced_extend_kid_withclone_addlibrilight_1130/embeddings_wespeaker_samresnet100/embeddings_utterances"
 MASTER_PORT=29503
 GPUS="0,1,2,3,4,5,6,7"  # Available GPUs (8 cards)
 
