@@ -92,16 +92,16 @@ def load_embeddings_chunk(file_paths_chunk):
     """多进程加载一批utterance embeddings"""
     embeddings_chunk = []
     utterance_data_chunk = []
-    utterance_paths_chunk = []
+    utterance_ids_chunk = []
     
     for file_path in file_paths_chunk:
         embedding, data = load_utterance_embedding(file_path)
         if embedding is not None and data is not None:
             embeddings_chunk.append(embedding)
             utterance_data_chunk.append(data)
-            utterance_paths_chunk.append(file_path)
+            utterance_ids_chunk.append(data.get('utterance_id', Path(file_path).stem))
     
-    return embeddings_chunk, utterance_data_chunk, utterance_paths_chunk
+    return embeddings_chunk, utterance_data_chunk, utterance_ids_chunk
 
 def compute_similarity_chunk(args):
     """多进程计算相似度矩阵的一个chunk"""
@@ -127,7 +127,7 @@ def compute_speaker_utterance_similarities(speaker_info, max_utterances=None, nu
         
         embeddings = []
         utterance_data_list = []
-        utterance_paths = []  # Store full paths for mapping
+        utterance_ids = []
         
         if len(files_to_process) > 100:  # Use multiprocessing for large speakers
             # Split files into chunks for parallel loading
@@ -137,10 +137,10 @@ def compute_speaker_utterance_similarities(speaker_info, max_utterances=None, nu
             with ProcessPoolExecutor(max_workers=num_workers_load) as executor:
                 futures = [executor.submit(load_embeddings_chunk, chunk) for chunk in file_chunks]
                 for future in futures:
-                    emb_chunk, data_chunk, paths_chunk = future.result()
+                    emb_chunk, data_chunk, ids_chunk = future.result()
                     embeddings.extend(emb_chunk)
                     utterance_data_list.extend(data_chunk)
-                    utterance_paths.extend(paths_chunk)
+                    utterance_ids.extend(ids_chunk)
         else:
             # For small speakers, load sequentially
             for file_path in files_to_process:
@@ -148,10 +148,7 @@ def compute_speaker_utterance_similarities(speaker_info, max_utterances=None, nu
                 if embedding is not None and data is not None:
                     embeddings.append(embedding)
                     utterance_data_list.append(data)
-                    utterance_paths.append(file_path)
-        
-        # Create mapping: path -> numeric id (0-indexed)
-        path_to_id = {path: idx for idx, path in enumerate(utterance_paths)}
+                    utterance_ids.append(data.get('utterance_id', Path(file_path).stem))
         
         if len(embeddings) < 2:
             return None, f"Speaker {dataset_name}/{speaker_id} has only {len(embeddings)} valid utterances (min: 2)"
@@ -189,11 +186,12 @@ def compute_speaker_utterance_similarities(speaker_info, max_utterances=None, nu
         
         # Create similarity pairs (upper triangular matrix, excluding diagonal)
         # Only save pairs above threshold to reduce file size
-        # Use numeric ids instead of utterance_id strings to reduce file size
         similarity_pairs = []
+        upper_triangular_sparse = []  # Sparse format: only save values >= threshold
         all_similarities_flat = []
         
         for i in range(num_utterances):
+            row_sparse = []  # Sparse row: [{'col': j, 'value': sim}, ...] for values >= threshold
             for j in range(i + 1, num_utterances):
                 sim_value = float(similarity_matrix[i, j])
                 all_similarities_flat.append(sim_value)
@@ -201,10 +199,21 @@ def compute_speaker_utterance_similarities(speaker_info, max_utterances=None, nu
                 # Only save pairs above threshold
                 if sim_value >= similarity_threshold:
                     similarity_pairs.append({
-                        'id_1': i,  # Use numeric id instead of utterance_id
-                        'id_2': j,  # Use numeric id instead of utterance_id
+                        'utterance_id_1': utterance_ids[i],
+                        'utterance_id_2': utterance_ids[j],
                         'similarity': sim_value
                     })
+                    # Store in sparse format: {'row': i, 'col': j, 'value': sim}
+                    row_sparse.append({
+                        'col': j,
+                        'value': sim_value
+                    })
+            # Only save rows that have at least one value above threshold
+            if row_sparse:
+                upper_triangular_sparse.append({
+                    'row': i,
+                    'values': row_sparse
+                })
         
         # Sort pairs by similarity (descending)
         similarity_pairs.sort(key=lambda x: x['similarity'], reverse=True)
@@ -218,9 +227,9 @@ def compute_speaker_utterance_similarities(speaker_info, max_utterances=None, nu
             'speaker_id': speaker_id,
             'num_utterances': num_utterances,
             'num_utterances_total': len(utterance_files),
-            'utterance_paths': utterance_paths,  # List of paths, index corresponds to numeric id
-            'path_to_id': path_to_id,  # Mapping: path -> numeric id (for reverse lookup)
-            'similarity_pairs': similarity_pairs,  # Pairs with numeric ids only (id_1, id_2, similarity)
+            'utterance_ids': utterance_ids,
+            'similarity_matrix_upper_triangular_sparse': upper_triangular_sparse,
+            'similarity_pairs': similarity_pairs,
             'statistics': {
                 'mean': float(np.mean(similarities_flat)),
                 'std': float(np.std(similarities_flat)),
@@ -234,7 +243,7 @@ def compute_speaker_utterance_similarities(speaker_info, max_utterances=None, nu
         }
         
         # Free memory
-        del embeddings_array, embeddings, similarity_matrix, similarities_flat
+        del embeddings_array, embeddings, similarity_matrix, similarities_flat, upper_triangular_sparse
         
         return result, None
         
@@ -470,6 +479,31 @@ def main():
         logger.error("No speaker utterances found!")
         sys.exit(1)
     
+    # If skip_existing is enabled, check which speakers already have output files
+    speakers_to_process = []
+    already_existing_count = 0
+    
+    if args.skip_existing:
+        logger.info(f"\n🔍 Checking existing output files (skip_existing=True)...")
+        for speaker_info in speaker_utterances:
+            dataset_name, speaker_id, _ = speaker_info
+            output_file = output_dir / dataset_name / f'{speaker_id}_utterance_similarities.json'
+            if output_file.exists():
+                already_existing_count += 1
+            else:
+                speakers_to_process.append(speaker_info)
+        
+        logger.info(f"  ✅ Found {already_existing_count} speakers with existing output files")
+        logger.info(f"  📝 {len(speakers_to_process)} speakers need to be processed")
+        logger.info(f"  📊 Total speakers: {len(speaker_utterances)}")
+    else:
+        speakers_to_process = speaker_utterances
+        logger.info(f"\n📝 Processing all {len(speakers_to_process)} speakers (skip_existing=False)")
+    
+    if not speakers_to_process:
+        logger.info("🎉 All speakers already have output files! Nothing to process.")
+        sys.exit(0)
+    
     # Process each speaker individually (one process per speaker)
     # This ensures that one speaker failure doesn't affect others
     start_time = time.time()
@@ -481,9 +515,9 @@ def main():
     
     # Use ProcessPoolExecutor with one speaker per process
     with ProcessPoolExecutor(max_workers=args.num_workers) as executor:
-        # Submit all speakers as individual tasks
+        # Submit only speakers that need processing
         futures = {}
-        for speaker_info in speaker_utterances:
+        for speaker_info in speakers_to_process:
             dataset_name, speaker_id, _ = speaker_info
             future = executor.submit(
                 process_single_speaker,
@@ -531,6 +565,8 @@ def main():
     
     logger.info(f"\n🎉 Utterance similarity computation completed!")
     logger.info(f"📊 Statistics:")
+    if args.skip_existing and already_existing_count > 0:
+        logger.info(f"  ✅ Already existed: {already_existing_count} speakers")
     logger.info(f"  ✅ Processed: {total_processed} speakers")
     logger.info(f"  ⏭️  Skipped: {total_skipped} speakers")
     logger.info(f"  ❌ Errors: {total_errors} speakers")

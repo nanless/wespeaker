@@ -350,7 +350,11 @@ def main():
             print(f"  📄 {sample_file.parent.name}/{sample_file.stem}:")
             print(f"     Utterances: {data.get('num_utterances', 'unknown')}")
             print(f"     Embedding dim: {data.get('embedding_dim', 'unknown')}")
-            print(f"     Mean value: {data.get('embedding_stats', {}).get('mean', 'unknown'):.4f}")
+            mean_value = data.get('embedding_stats', {}).get('mean', 'unknown')
+            if isinstance(mean_value, (int, float)):
+                print(f"     Mean value: {mean_value:.4f}")
+            else:
+                print(f"     Mean value: {mean_value}")
             
         except Exception as e:
             print(f"     Error reading sample: {e}")

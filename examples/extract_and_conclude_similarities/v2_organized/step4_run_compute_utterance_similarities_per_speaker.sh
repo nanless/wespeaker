@@ -109,6 +109,13 @@ OUTPUT_FULL_PATH="$EMBEDDINGS_DIR/$OUTPUT_SUBDIR"
 if [ -d "$OUTPUT_FULL_PATH" ]; then
     EXISTING_RESULTS=$(find "$OUTPUT_FULL_PATH" -name "*_utterance_similarities.json" | wc -l)
     echo -e "  📊 Existing similarity results: ${EXISTING_RESULTS} files"
+    
+    # If SKIP_EXISTING is enabled, show detailed breakdown
+    if [ "$SKIP_EXISTING" = true ]; then
+        echo -e "  🔍 Checking existing files (skip_existing=true)..."
+        echo -e "    • These speakers will be skipped during processing"
+        echo -e "    • Only speakers without output files will be processed"
+    fi
 else
     echo -e "  📊 Existing similarity results: 0 files"
 fi
