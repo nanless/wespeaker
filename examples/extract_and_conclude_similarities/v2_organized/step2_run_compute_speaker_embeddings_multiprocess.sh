@@ -11,7 +11,9 @@ SPEAKERS_DIR="/root/group-shared/voiceprint/data/speech/speaker_diarization/merg
 MIN_UTTERANCES=1
 NUM_PROCESSES=$(nproc)  # Use all available CPU cores
 CHUNK_SIZE=10
-SKIP_EXISTING=true
+SKIP_EXISTING=false
+# Exclude utterance embedding files whose basename starts with "voiceprint"
+EXCLUDE_VOICEPRINT_PREFIX=true
 
 # Colors for output
 RED='\033[0;31m'
@@ -28,6 +30,7 @@ echo -e "  🔢 Minimum utterances: ${MIN_UTTERANCES}"
 echo -e "  ⚡ Number of processes: ${NUM_PROCESSES}"
 echo -e "  📦 Chunk size: ${CHUNK_SIZE}"
 echo -e "  ⏭️  Skip existing: ${SKIP_EXISTING}"
+echo -e "  🚫 Exclude voiceprint* files: ${EXCLUDE_VOICEPRINT_PREFIX}"
 echo -e "${BLUE}===============================================${NC}"
 
 # Check if utterances directory exists
@@ -91,6 +94,10 @@ CMD_ARGS=(
 
 if [ "$SKIP_EXISTING" = true ]; then
     CMD_ARGS+=("--skip_existing")
+fi
+
+if [ "$EXCLUDE_VOICEPRINT_PREFIX" = true ]; then
+    CMD_ARGS+=("--exclude_filename_prefix" "voiceprint")
 fi
 
 # Run the Python script

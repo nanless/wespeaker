@@ -22,21 +22,29 @@ def get_args():
                         help='Output directory for speaker embeddings')
     parser.add_argument('--min_utterances', type=int, default=1,
                         help='Minimum number of utterances required for a speaker')
-    parser.add_argument('--skip_existing', action='store_true', default=True,
-                        help='Skip speakers that already have embeddings')
+    parser.add_argument('--skip_existing', action='store_true', default=False,
+                        help='Skip speakers that already have embeddings (default: False)')
     parser.add_argument('--num_processes', type=int, default=None,
                         help='Number of processes to use (default: CPU count)')
     parser.add_argument('--chunk_size', type=int, default=10,
                         help='Number of speakers to process per chunk')
+    parser.add_argument(
+        '--exclude_filename_prefix',
+        nargs='*',
+        default=[],
+        help='Exclude utterance embedding files whose basename starts with any of these prefixes (e.g., voiceprint)'
+    )
     
     return parser.parse_args()
 
-def scan_utterance_files(utterances_dir):
+def scan_utterance_files(utterances_dir, exclude_filename_prefixes=None):
     """Scan utterance directory and group files by speaker."""
     print("🔍 Scanning utterance embedding files...")
+    exclude_filename_prefixes = exclude_filename_prefixes or []
     
     speaker_files = defaultdict(list)
     total_files = 0
+    excluded_files = 0
     
     utterances_path = Path(utterances_dir)
     if not utterances_path.exists():
@@ -63,6 +71,11 @@ def scan_utterance_files(utterances_dir):
             utterance_files = []
             for file_path in speaker_dir.iterdir():
                 if file_path.suffix.lower() == '.pkl':
+                    if exclude_filename_prefixes and any(
+                        file_path.name.startswith(prefix) for prefix in exclude_filename_prefixes
+                    ):
+                        excluded_files += 1
+                        continue
                     utterance_files.append(str(file_path))
                     total_files += 1
             
@@ -70,6 +83,8 @@ def scan_utterance_files(utterances_dir):
                 speaker_files[speaker_key] = utterance_files
     
     print(f"📊 Found {len(speaker_files)} speakers with {total_files} total utterance files")
+    if exclude_filename_prefixes:
+        print(f"🚫 Excluded {excluded_files} utterance files by filename prefix: {exclude_filename_prefixes}")
     return speaker_files, total_files
 
 def load_utterance_embedding(file_path):
@@ -242,6 +257,7 @@ def main():
     print(f"Skip existing: {args.skip_existing}")
     print(f"Number of processes: {args.num_processes}")
     print(f"Chunk size: {args.chunk_size}")
+    print(f"Exclude filename prefixes: {args.exclude_filename_prefix}")
     print("=====================================================")
     
     # Check input directory
@@ -253,7 +269,10 @@ def main():
     os.makedirs(args.speakers_dir, exist_ok=True)
     
     # Scan utterance files
-    speaker_files, total_utterances = scan_utterance_files(args.utterances_dir)
+    speaker_files, total_utterances = scan_utterance_files(
+        args.utterances_dir,
+        exclude_filename_prefixes=args.exclude_filename_prefix
+    )
     
     if not speaker_files:
         print("❌ No speaker files found!")
