@@ -3,6 +3,7 @@
 import os
 import sys
 import argparse
+import fnmatch
 import pickle
 import numpy as np
 from pathlib import Path
@@ -34,58 +35,89 @@ def get_args():
         default=[],
         help='Exclude utterance embedding files whose basename starts with any of these prefixes (e.g., voiceprint)'
     )
-    
+    parser.add_argument(
+        '--exclude_filename_pattern',
+        nargs='*',
+        default=[],
+        help='Exclude utterance embedding files matching any of these glob patterns (e.g., *_clone_text_*)'
+    )
+
     return parser.parse_args()
 
-def scan_utterance_files(utterances_dir, exclude_filename_prefixes=None):
+def scan_utterance_files(utterances_dir, exclude_filename_prefixes=None,
+                        exclude_filename_patterns=None):
     """Scan utterance directory and group files by speaker."""
     print("🔍 Scanning utterance embedding files...")
     exclude_filename_prefixes = exclude_filename_prefixes or []
-    
+    exclude_filename_patterns = exclude_filename_patterns or []
+
     speaker_files = defaultdict(list)
     total_files = 0
-    excluded_files = 0
-    
+    excluded_by_prefix = 0
+    excluded_by_pattern = 0
+
     utterances_path = Path(utterances_dir)
     if not utterances_path.exists():
         print(f"❌ Error: Utterances directory does not exist: {utterances_dir}")
-        return speaker_files, 0
-    
+        return speaker_files, 0, 0, 0
+
     # Scan all datasets
     for dataset_dir in utterances_path.iterdir():
         if not dataset_dir.is_dir():
             continue
-            
+
         dataset_name = dataset_dir.name
-        print(f"  📂 Scanning dataset: {dataset_name}")
-        
+        dataset_included = 0
+        dataset_excluded_prefix = 0
+        dataset_excluded_pattern = 0
+
         # Scan all speakers in this dataset
         for speaker_dir in dataset_dir.iterdir():
             if not speaker_dir.is_dir():
                 continue
-                
+
             speaker_id = speaker_dir.name
             speaker_key = (dataset_name, speaker_id)
-            
+
             # Scan all utterance files for this speaker
             utterance_files = []
             for file_path in speaker_dir.iterdir():
                 if file_path.suffix.lower() == '.pkl':
+                    # Check prefix exclusion
                     if exclude_filename_prefixes and any(
-                        file_path.name.startswith(prefix) for prefix in exclude_filename_prefixes
+                        file_path.name.startswith(prefix)
+                        for prefix in exclude_filename_prefixes
                     ):
-                        excluded_files += 1
+                        excluded_by_prefix += 1
+                        dataset_excluded_prefix += 1
+                        continue
+                    # Check pattern exclusion
+                    if exclude_filename_patterns and any(
+                        fnmatch.fnmatch(file_path.name, pattern)
+                        for pattern in exclude_filename_patterns
+                    ):
+                        excluded_by_pattern += 1
+                        dataset_excluded_pattern += 1
                         continue
                     utterance_files.append(str(file_path))
                     total_files += 1
-            
+                    dataset_included += 1
+
             if utterance_files:
                 speaker_files[speaker_key] = utterance_files
-    
-    print(f"📊 Found {len(speaker_files)} speakers with {total_files} total utterance files")
+
+        print(f"  📂 {dataset_name}: "
+              f"✅{dataset_included} non-clone "
+              f"🗑️{dataset_excluded_pattern} clone "
+              f"🚫{dataset_excluded_prefix} prefix-excluded")
+
+    print(f"\n📊 Summary:")
+    print(f"   ✅ Non-clone utterances (will be used): {total_files}")
+    print(f"   🗑️  Clone utterances excluded by pattern ({exclude_filename_patterns}): {excluded_by_pattern}")
     if exclude_filename_prefixes:
-        print(f"🚫 Excluded {excluded_files} utterance files by filename prefix: {exclude_filename_prefixes}")
-    return speaker_files, total_files
+        print(f"   🚫 Utterances excluded by prefix ({exclude_filename_prefixes}): {excluded_by_prefix}")
+    print(f"   👥 Speakers with non-clone utterances: {len(speaker_files)}")
+    return speaker_files, total_files, excluded_by_pattern, excluded_by_prefix
 
 def load_utterance_embedding(file_path):
     """Load embedding from a single utterance file."""
@@ -258,22 +290,24 @@ def main():
     print(f"Number of processes: {args.num_processes}")
     print(f"Chunk size: {args.chunk_size}")
     print(f"Exclude filename prefixes: {args.exclude_filename_prefix}")
+    print(f"Exclude filename patterns: {args.exclude_filename_pattern}")
     print("=====================================================")
-    
+
     # Check input directory
     if not os.path.exists(args.utterances_dir):
         print(f"❌ Error: Utterances directory does not exist: {args.utterances_dir}")
         sys.exit(1)
-    
+
     # Create output directory
     os.makedirs(args.speakers_dir, exist_ok=True)
-    
+
     # Scan utterance files
-    speaker_files, total_utterances = scan_utterance_files(
+    speaker_files, total_utterances, excluded_clone, excluded_prefix = scan_utterance_files(
         args.utterances_dir,
-        exclude_filename_prefixes=args.exclude_filename_prefix
+        exclude_filename_prefixes=args.exclude_filename_prefix,
+        exclude_filename_patterns=args.exclude_filename_pattern
     )
-    
+
     if not speaker_files:
         print("❌ No speaker files found!")
         sys.exit(1)

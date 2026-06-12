@@ -16,6 +16,7 @@ TOP_K=100
 SKIP_SIMILARITY=false
 RESUME=false
 MAX_SPEAKERS=
+EXCLUDE_CLONE_PATTERN="*_clone_text_*"
 
 # Colors for output
 RED='\033[0;31m'
@@ -35,6 +36,7 @@ echo -e "  📦 Batch size: ${BATCH_SIZE}"
 echo -e "  🔝 Top-K similar speakers: ${TOP_K}"
 echo -e "  ⏭️  Skip similarity computation: ${SKIP_SIMILARITY}"
 echo -e "  🔄 Resume from previous progress: ${RESUME}"
+echo -e "  🗑️  Exclude clone TTS pattern: ${EXCLUDE_CLONE_PATTERN}"
 echo -e "${BLUE}===============================================${NC}"
 
 # Check if embeddings directory exists
@@ -136,6 +138,10 @@ fi
 
 if [ -n "$MAX_SPEAKERS" ]; then
     CMD_ARGS+=("--max_speakers" "$MAX_SPEAKERS")
+fi
+
+if [ -n "$EXCLUDE_CLONE_PATTERN" ]; then
+    CMD_ARGS+=("--exclude_filename_pattern" "$EXCLUDE_CLONE_PATTERN")
 fi
 
 # Set environment variables for better performance

@@ -14,6 +14,7 @@
 
 import os
 import sys
+import fnmatch
 import json
 import pickle
 import numpy as np
@@ -68,7 +69,24 @@ def parse_args():
                         help='Skip similarity computation (only process speaker embeddings)')
     parser.add_argument('--top_k', type=int, default=100,
                         help='Number of top similar speakers to compute for each speaker')
-    
+    parser.add_argument(
+        '--exclude_filename_pattern',
+        nargs='*',
+        default=[],
+        help='Exclude utterance files matching any of these glob patterns (e.g., *_clone_text_*)'
+    )
+    parser.add_argument(
+        '--use_existing_speakers', action='store_true', default=True,
+        help='Load pre-computed speaker embeddings from speakers_output_subdir '
+             'instead of recomputing from utterances (default: True). '
+             'Use --no-use_existing_speakers to force recompute.'
+    )
+    # Support --no-use_existing_speakers to disable
+    parser.add_argument(
+        '--no-use_existing_speakers', action='store_false', dest='use_existing_speakers',
+        help='Force recompute speaker embeddings from utterances'
+    )
+
     return parser.parse_args()
 
 # 并行处理一批说话人的embedding，计算每个说话人的平均embedding
@@ -135,50 +153,69 @@ def load_speaker_embeddings_batch(speaker_batch):
 # 快速扫描所有说话人的语音文件，构建说话人到utterance的映射
 # 返回一个字典，key为说话人，value为该说话人的utterance信息列表
 
-def scan_speaker_utterances_fast(utterances_dir, max_speakers=None):
+def scan_speaker_utterances_fast(utterances_dir, max_speakers=None,
+                                exclude_patterns=None):
     """快速扫描所有说话人的语音文件"""
     logger = logging.getLogger(__name__)
     logger.info(f"Fast scanning utterances in: {utterances_dir}")
-    
+    exclude_patterns = exclude_patterns or []
+
     speaker_utterances = defaultdict(list)  # 说话人到utterance的映射
     speaker_count = 0  # 计数器，支持最大说话人数限制
-    
+    excluded_clone = 0
+    total_files = 0
+
     for dataset_dir in Path(utterances_dir).iterdir():  # 遍历每个数据集目录
         if not dataset_dir.is_dir():
             continue
-            
+
         dataset_name = dataset_dir.name
-        logger.info(f"Processing dataset: {dataset_name}")
-        
+        dataset_included = 0
+        dataset_excluded = 0
+
         for speaker_dir in dataset_dir.iterdir():  # 遍历每个说话人目录
             if not speaker_dir.is_dir():
                 continue
-                
+
             if max_speakers and speaker_count >= max_speakers:
                 break
-                
+
             speaker_id = speaker_dir.name
             speaker_key = speaker_id
-            
+
             # 快速收集该说话人的所有pkl文件
             pkl_files = list(speaker_dir.glob('*.pkl'))
             for pkl_file in pkl_files:
+                if exclude_patterns and any(
+                    fnmatch.fnmatch(pkl_file.name, p)
+                    for p in exclude_patterns
+                ):
+                    excluded_clone += 1
+                    dataset_excluded += 1
+                    continue
                 speaker_utterances[speaker_key].append({
                     'file_path': str(pkl_file),
                     'dataset': dataset_name,
                     'speaker_id': speaker_id,
                     'utterance_id': pkl_file.stem
                 })
-            
-            speaker_count += 1
-            
+                total_files += 1
+                dataset_included += 1
+
+            if speaker_key in speaker_utterances:
+                speaker_count += 1
+
+        logger.info(f"  {dataset_name}: ✅{dataset_included} non-clone "
+                    f"🗑️{dataset_excluded} clone")
+
         if max_speakers and speaker_count >= max_speakers:
             break
-    
-    logger.info(f"Found {len(speaker_utterances)} speakers")
+
+    logger.info(f"Found {speaker_count} speakers (with non-clone utterances)")
     total_utterances = sum(len(utts) for utts in speaker_utterances.values())
-    logger.info(f"Total utterances: {total_utterances}")
-    
+    logger.info(f"Non-clone utterances: {total_utterances}")
+    logger.info(f"Clone utterances excluded by pattern ({exclude_patterns}): {excluded_clone}")
+
     return speaker_utterances
 
 # 保存处理进度到json文件，便于断点续跑
@@ -267,6 +304,51 @@ def compute_speaker_embeddings_parallel(speaker_utterances, num_workers, batch_s
         save_progress(speaker_embeddings, speaker_info, progress_file)
     
     logger.info(f"Computed embeddings for {len(speaker_embeddings)} speakers")
+    return speaker_embeddings, speaker_info
+
+def load_existing_speaker_embeddings(speakers_dir):
+    """Load pre-computed speaker embeddings from step2 output directory."""
+    logger = logging.getLogger(__name__)
+    logger.info(f"Loading existing speaker embeddings from: {speakers_dir}")
+
+    speaker_embeddings = {}
+    speaker_info = {}
+    failed = 0
+
+    for dataset_dir in Path(speakers_dir).iterdir():
+        if not dataset_dir.is_dir():
+            continue
+        dataset_name = dataset_dir.name
+        for pkl_file in dataset_dir.glob('*.pkl'):
+            try:
+                with open(pkl_file, 'rb') as f:
+                    data = pickle.load(f)
+                embedding = data.get('embedding')
+                if embedding is None:
+                    failed += 1
+                    continue
+                if not isinstance(embedding, np.ndarray):
+                    embedding = np.array(embedding)
+                if embedding.ndim > 1:
+                    embedding = embedding.flatten()
+                if np.isnan(embedding).any() or np.isinf(embedding).any():
+                    failed += 1
+                    continue
+
+                speaker_id = data.get('speaker_id', pkl_file.stem)
+                speaker_embeddings[speaker_id] = embedding
+                speaker_info[speaker_id] = {
+                    'dataset': data.get('dataset', dataset_name),
+                    'speaker_id': speaker_id,
+                    'speaker_key': speaker_id,
+                    'num_utterances': data.get('num_utterances', 0),
+                    'embedding_dim': len(embedding),
+                }
+            except Exception as e:
+                failed += 1
+
+    logger.info(f"Loaded {len(speaker_embeddings)} speaker embeddings "
+                f"(failed: {failed})")
     return speaker_embeddings, speaker_info
 
 # 批量保存每个说话人的embedding和信息到指定目录
@@ -668,41 +750,63 @@ def main():
     logger.info(f"Utterances directory: {utterances_dir}")
     logger.info(f"Speakers output directory: {speakers_output_dir}")
     logger.info(f"Similarities output directory: {similarities_output_dir}")
-    
+    logger.info(f"Exclude filename patterns: {args.exclude_filename_pattern}")
+
     # 检查输入目录是否存在
     if not os.path.exists(utterances_dir):
         logger.error(f"Utterances directory not found: {utterances_dir}")
         return
-    
-    # 1. 快速扫描所有说话人的语音文件，构建说话人-utterance映射
-    logger.info("=== Stage 1: Scanning speaker files ===")
-    scan_start = time.time()
-    speaker_utterances = scan_speaker_utterances_fast(utterances_dir, args.max_speakers)
-    if not speaker_utterances:
-        logger.error("No speaker utterances found!")
-        return
-    scan_time = time.time() - scan_start
-    logger.info(f"Scanning completed in {scan_time:.2f} seconds")
-    
-    # 2. 并行计算每个说话人的平均embedding，支持断点续跑
-    logger.info("=== Stage 2: Computing speaker embeddings ===")
-    embed_start = time.time()
-    speaker_embeddings, speaker_info = compute_speaker_embeddings_parallel(
-        speaker_utterances, args.num_workers, args.batch_size, 
-        progress_file if args.resume else None
-    )
+
+    speaker_embeddings = {}
+    speaker_info = {}
+
+    # Check if we can load pre-computed speaker embeddings
+    if args.use_existing_speakers and os.path.isdir(speakers_output_dir):
+        logger.info("=== Stage 0: Attempting to load existing speaker embeddings ===")
+        speaker_embeddings, speaker_info = load_existing_speaker_embeddings(
+            speakers_output_dir)
+        if speaker_embeddings:
+            logger.info("Using existing speaker embeddings (skip Stages 1-3)")
+        else:
+            logger.warning("No valid existing embeddings found, will recompute")
+
+    # Fall back to recomputing if we don't have existing embeddings
     if not speaker_embeddings:
-        logger.error("No speaker embeddings computed!")
-        return
-    embed_time = time.time() - embed_start
-    logger.info(f"Embedding computation completed in {embed_time:.2f} seconds")
-    
-    # 3. 保存每个说话人的embedding和信息到文件
-    logger.info("=== Stage 3: Saving speaker files ===")
-    save_start = time.time()
-    save_speaker_files_fast(speaker_embeddings, speaker_info, speakers_output_dir)
-    save_time = time.time() - save_start
-    logger.info(f"Speaker files saved in {save_time:.2f} seconds")
+        if args.use_existing_speakers:
+            logger.info("Falling back to recomputing speaker embeddings...")
+
+        # 1. 快速扫描所有说话人的语音文件，构建说话人-utterance映射
+        logger.info("=== Stage 1: Scanning speaker files ===")
+        scan_start = time.time()
+        speaker_utterances = scan_speaker_utterances_fast(
+            utterances_dir, args.max_speakers,
+            exclude_patterns=args.exclude_filename_pattern
+        )
+        if not speaker_utterances:
+            logger.error("No speaker utterances found!")
+            return
+        scan_time = time.time() - scan_start
+        logger.info(f"Scanning completed in {scan_time:.2f} seconds")
+
+        # 2. 并行计算每个说话人的平均embedding，支持断点续跑
+        logger.info("=== Stage 2: Computing speaker embeddings ===")
+        embed_start = time.time()
+        speaker_embeddings, speaker_info = compute_speaker_embeddings_parallel(
+            speaker_utterances, args.num_workers, args.batch_size,
+            progress_file if args.resume else None
+        )
+        if not speaker_embeddings:
+            logger.error("No speaker embeddings computed!")
+            return
+        embed_time = time.time() - embed_start
+        logger.info(f"Embedding computation completed in {embed_time:.2f} seconds")
+
+        # 3. 保存每个说话人的embedding和信息到文件
+        logger.info("=== Stage 3: Saving speaker files ===")
+        save_start = time.time()
+        save_speaker_files_fast(speaker_embeddings, speaker_info, speakers_output_dir)
+        save_time = time.time() - save_start
+        logger.info(f"Speaker files saved in {save_time:.2f} seconds")
     
     # 4. 计算说话人相似度（可选，支持跳过）
     if not args.skip_similarity:

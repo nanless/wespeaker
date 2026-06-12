@@ -14,6 +14,8 @@ CHUNK_SIZE=10
 SKIP_EXISTING=false
 # Exclude utterance embedding files whose basename starts with "voiceprint"
 EXCLUDE_VOICEPRINT_PREFIX=true
+# Exclude TTS clone audio files
+EXCLUDE_CLONE_PATTERN="*_clone_text_*"
 
 # Colors for output
 RED='\033[0;31m'
@@ -31,6 +33,7 @@ echo -e "  ⚡ Number of processes: ${NUM_PROCESSES}"
 echo -e "  📦 Chunk size: ${CHUNK_SIZE}"
 echo -e "  ⏭️  Skip existing: ${SKIP_EXISTING}"
 echo -e "  🚫 Exclude voiceprint* files: ${EXCLUDE_VOICEPRINT_PREFIX}"
+echo -e "  🗑️  Exclude clone TTS pattern: ${EXCLUDE_CLONE_PATTERN}"
 echo -e "${BLUE}===============================================${NC}"
 
 # Check if utterances directory exists
@@ -98,6 +101,10 @@ fi
 
 if [ "$EXCLUDE_VOICEPRINT_PREFIX" = true ]; then
     CMD_ARGS+=("--exclude_filename_prefix" "voiceprint")
+fi
+
+if [ -n "$EXCLUDE_CLONE_PATTERN" ]; then
+    CMD_ARGS+=("--exclude_filename_pattern" "$EXCLUDE_CLONE_PATTERN")
 fi
 
 # Run the Python script
